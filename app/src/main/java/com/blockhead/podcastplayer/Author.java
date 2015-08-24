@@ -11,7 +11,7 @@ public class Author {
     private String artworkSmallUrl, artworkMediumUrl, artworkLargeUrl;
     private String description;
     private ArrayList<Podcast> podcasts;
-    
+
 
     Author()
     {

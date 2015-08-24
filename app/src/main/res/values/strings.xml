@@ -8,4 +8,9 @@
     <string name="hello_world">Hello world!</string>
 
     <string name="action_settings">Settings</string>
+
+    <string name="sample_description">A podcast about nothing. In this weeks hilarious podcast
+    version of the popular sitcom Seinfeld, we look back at all the moments Jerry and Elaine gave
+    into temptation. We\'ll relive some of the hilarious, awkward, yet somehow satisfying moments.</string>
+
 </resources>

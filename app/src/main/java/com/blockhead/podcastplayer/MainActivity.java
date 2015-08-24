@@ -2,44 +2,43 @@ package com.blockhead.podcastplayer;
 
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.Reader;
 import java.net.URL;
-import java.net.URLConnection;
-import java.nio.charset.Charset;
 import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
 
+import android.os.AsyncTask;
 import android.support.v7.app.AppCompatActivity;
-import android.support.v7.app.ActionBar;
 import android.support.v4.app.Fragment;
 import android.support.v4.app.FragmentManager;
-import android.support.v4.app.FragmentTransaction;
 import android.support.v4.app.FragmentPagerAdapter;
 import android.os.Bundle;
 import android.support.v4.view.ViewPager;
 import android.util.Log;
-import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ListView;
 import android.widget.TextView;
-import android.widget.Toast;
 
-import com.pkmmte.pkrss.Article;
-import com.pkmmte.pkrss.Callback;
-import com.pkmmte.pkrss.Category;
-import com.pkmmte.pkrss.PkRSS;
+import com.nostra13.universalimageloader.core.ImageLoader;
+import com.nostra13.universalimageloader.core.ImageLoaderConfiguration;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NamedNodeMap;
+import org.w3c.dom.NodeList;
 
 public class MainActivity extends AppCompatActivity {
+    private final String TAG = "pkrss", TAG2 = "bhca";
+    private ArrayList<Podcast> searchResultPodcastList = new ArrayList<>();
+    private static ListView searchResultListView;
+    private static SearchResultAdapter searchResultAdapter;
 
     /**
      * The {@link android.support.v4.view.PagerAdapter} that will provide
@@ -60,6 +59,8 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        ImageLoader.getInstance().init(new ImageLoaderConfiguration.Builder(this)
+                .build());
 
 
         // Create the adapter that will return a fragment for each of the three
@@ -70,37 +71,105 @@ public class MainActivity extends AppCompatActivity {
         mViewPager = (ViewPager) findViewById(R.id.pager);
         mViewPager.setAdapter(mSectionsPagerAdapter);
 
-        PkRSS.with(this)
-                .load("http://feeds.feedburner.com/49erswebzone-podcast")
-                .callback(new Callback() {
-                    @Override
-                    public void OnPreLoad() {
-                        Log.d("pkrss", "OnPreLoad2");
-                    }
+        searchResultAdapter = new SearchResultAdapter(getApplicationContext()
+        , searchResultPodcastList);
 
-                    @Override
-                    public void OnLoaded(final List<Article> list) {
-                        Log.d("pkrss", "OnLoaded2");
-                        feedLoaded();
-                    }
-
-                    @Override
-                    public void OnLoadFailed() {
-                        Log.d("pkrss", "OnLoadFailed2");
-                    }
-                })
-                .async();
+        MySync s = new MySync();
+        s.execute();
 
     }
 
-    private void feedLoaded() {
-        //Article art = list.get(0);
-        //Log.d("pkrss", art.getId() + "");
+    public class MySync extends AsyncTask<Void, Void, Void>
+    {
 
+        @Override
+        protected Void doInBackground(Void... params) {
+            //String feedUrl = getFeedUrl("https://itunes.apple.com/search?term=Better+Rivals&entity=podcast");
+            String feedUrl = getFeedUrl("https://itunes.apple.com/search?term=Around+the+NFL&entity=podcast");
+
+
+            if(feedUrl != null)
+                searchResultPodcastList = getPodcastListFromFeed(feedUrl);
+
+            //getPodcastListFromFeed("http://aroundtheleague.libsyn.com/rss");
+            return null;
+        }
+
+        @Override
+        protected void onPostExecute(Void result)
+        {
+            if(searchResultListView != null)
+            {
+                searchResultAdapter = new SearchResultAdapter(getApplicationContext(), searchResultPodcastList);
+                searchResultListView.setAdapter(searchResultAdapter);
+                searchResultAdapter.notifyDataSetChanged();
+            }
+        }
+    }
+
+    private ArrayList<Podcast> getPodcastListFromFeed(String url)
+    {
+        try
+        {
+            ArrayList<Podcast> podcastList = new ArrayList<>();
+            XMLParser parser = new XMLParser();
+            String xml = parser.getXmlFromUrl(url); // getting XML from URL
+            Document doc = parser.getDomElement(xml);
+            NodeList items = doc.getElementsByTagName("item");
+            Log.d(TAG, "item length: " + items.getLength());
+
+            for (int k = 0; k < items.getLength() && k < 5; k++) //Cycle through each podcast in feed
+            {
+                Podcast tempPodcast = new Podcast();
+                NodeList nl = items.item(k).getChildNodes();
+                Log.d(TAG, "===============" + k + "================");
+                for (int i = 0; i < nl.getLength(); i++) //Cycle through each podcast's attributes
+                {
+                    String name = nl.item(i).getNodeName();
+                    String value = "";
+                    if (!name.equals("#text"))
+                    {
+                        Element e = (Element) nl.item(i);
+                        if (!e.hasAttributes())
+                        {
+                            value = nl.item(i).getTextContent();
+                            //Log.d(TAG, "SENDING -> " + name + ": " + value);
+                            tempPodcast = populatePodcastFromXml(tempPodcast, name, value);
+                        }
+                        else if (name.equals("guid"))    //SPECIAL CASE FOR GUID TODO: Make more universal
+                        {
+                            //Log.d(TAG, "+++++GUID: " + nl.item(i).getTextContent());
+                            value = nl.item(i).getTextContent();
+                            tempPodcast = populatePodcastFromXml(tempPodcast, name, value);
+                        }
+                        else {
+                            NamedNodeMap map = e.getAttributes();
+                            for (int j = 0; j < map.getLength(); j++)
+                            {
+                                String attrName = map.item(j).getNodeName();
+                                String attrVal = map.item(j).getTextContent();
+                                //Log.d(TAG, "(ATTRS) SENDING -> " + name + ": " + attrName + " = " + attrVal);
+                                tempPodcast = populatePodcastFromXml(tempPodcast, name, attrName, attrVal);
+                            }
+                        }
+                    }
+                }
+                podcastList.add(tempPodcast);
+            }
+            Log.d(TAG2, "Final Size after populating: " + podcastList.size());
+            return podcastList;
+        }
+        catch (Exception e)
+        {
+            Log.d(TAG, "Error executing getPodcastListFromFeed() " + e.getMessage());
+            return null;
+        }
+    }
+    private String getFeedUrl(String url) {
         try
         {
             String str = "";
-            URL oracle = new URL("https://itunes.apple.com/search?term=Around+the+NFL&entity=podcast");
+            URL oracle = new URL(url);
             BufferedReader in = new BufferedReader(
                     new InputStreamReader(oracle.openStream()));
 
@@ -112,40 +181,88 @@ public class MainActivity extends AppCompatActivity {
             JSONObject j = new JSONObject(str);
             JSONArray jArr = new JSONArray(j.get("results").toString());
             JSONObject j2 = jArr.optJSONObject(0);
-            Log.d("pkrss", "URL: " + j2.getString("artworkUrl60"));
+            String feedUrl = j2.getString("feedUrl");
+            Log.d(TAG, "feed: " + feedUrl);
+            return feedUrl;
         }
         catch (JSONException e)
         {
-            Log.d("pkrss", "JSONException: " + e.getMessage());
+            Log.d(TAG, "JSONException: " + e.getMessage());
         }
         catch (IOException e)
         {
-            Log.d("pkrss", "IOException: " + e.getMessage());
+            Log.d(TAG, "IOException: " + e.getMessage());
         }
-
+        return null;
     }
 
-    private static String readAll(Reader rd) throws IOException {
-        StringBuilder sb = new StringBuilder();
-        int cp;
-        while ((cp = rd.read()) != -1) {
-            sb.append((char) cp);
+    private Podcast populatePodcastFromXml(Podcast podcast, String elemName, String elemVal)
+    {
+        switch(elemName)
+        {
+            case "title":
+                Log.d(TAG, "Title: " + elemVal);
+                podcast.setTitle(elemVal);
+                break;
+            case "itunes:author":
+                Log.d(TAG, "Author: " + elemVal);
+                podcast.setAuthor(elemVal);
+            case "pubDate":
+                Log.d(TAG, "Date Published: " + elemVal);
+                podcast.setDatePublished(elemVal);
+                break;
+            case "guid":
+                Log.d(TAG, "ID: " + elemVal);
+                podcast.setId(elemVal);
+                break;
+            case "link":
+                Log.d(TAG, "Link: " + elemVal);
+                podcast.setAudioUrl(elemVal);
+                break;
+            case "description":
+                Log.d(TAG, "Description: " + elemVal);
+                podcast.setDescription(elemVal);
+                break;
+            case "itunes:duration":
+                Log.d(TAG, "Duration: " + elemVal);
+                podcast.setDuration(elemVal);
+                break;
+            case "itunes:explicit":
+                Log.d(TAG, "Explicit: " + elemVal); //TODO: add
+                break;
+            case "itunes:keywords":
+                Log.d(TAG, "Keywords: " + elemVal); //TODO: add
+                break;
+            case "itunes:subtitle":
+                Log.d(TAG, "Subtitle: " + elemVal); //TODO: add
+                break;
+            default:
+                Log.d(TAG, "Invalid");
+                break;
         }
-        return sb.toString();
+        return podcast;
     }
 
-    public static JSONObject readJsonFromUrl(String url) throws IOException, JSONException {
-        InputStream is = new URL(url).openStream();
-        try {
-            BufferedReader rd = new BufferedReader(new InputStreamReader(is, Charset.forName("UTF-8")));
-            String jsonText = readAll(rd);
-            JSONObject json = new JSONObject(jsonText);
-            return json;
-        } finally {
-            is.close();
+    private Podcast populatePodcastFromXml(Podcast podcast, String elemName, String attrName, String attrValue)
+    {
+        switch(elemName)
+        {
+            case "enclosure":   //TODO: add
+                if(attrName.equals("length"))
+                    Log.d(TAG, "Length: " + attrValue);
+                else if(attrName.equals("type"))
+                    Log.d(TAG, "Type: " + attrValue);
+                else if(attrName.equals("url"))
+                    Log.d(TAG, "Audio Url: " + attrValue);
+                break;
+            case "itunes:image":
+                Log.d(TAG, "Image Link: " + attrValue);
+                podcast.setArtworkLargeUrl(attrValue);
+                break;
         }
-    }
 
+        return podcast;
+    }
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
@@ -242,7 +359,9 @@ public class MainActivity extends AppCompatActivity {
             if(page == 1)
             {
                 View rootView = inflater.inflate(R.layout.fragment_main, container, false);
-                ((TextView)(rootView.findViewById(R.id.section_label))).setText("Page: " + page);
+                searchResultListView = (ListView)rootView.findViewById(R.id.search_result_list_view);
+                if(searchResultListView != null)
+                    searchResultListView.setAdapter(searchResultAdapter);
                 return rootView;
             }
             else
